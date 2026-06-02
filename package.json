@@ -1,0 +1,20 @@
+{
+  "name": "amu-ai",
+  "version": "2.0.0",
+  "description": "AMU.ai — AI-powered chatbot for Aligarh Muslim University students. Search notices, results, departments, exam schedules, and more using natural language.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "test": "node test.js"
+  },
+  "keywords": ["amu", "aligarh", "muslim-university", "student-assistant", "ai-chatbot", "gemini"],
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@google/generative-ai": "^0.21.0",
+    "dotenv": "^16.4.7"
+  }
+}
