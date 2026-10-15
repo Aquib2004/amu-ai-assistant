@@ -24,6 +24,40 @@ const AMU_API = "https://api.amu.ac.in/api/v1";
 const AMU_STORAGE = "https://api.amu.ac.in/storage";
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
 
+const { version: PACKAGE_VERSION } = require("./package.json");
+
+// ==================== RELIABILITY SETTINGS ====================
+// Upstream AMU pages/JSON are cached in-memory by getJson()/getText() (8 min TTL).
+// Simple in-memory rate limit for POST /api/chat (per client IP).
+const RATE_LIMIT_MAX = Number(process.env.RATE_LIMIT_MAX || 30);
+const RATE_LIMIT_WINDOW_MS = 60_000;
+const MAX_MESSAGE_LENGTH = 2000;
+
+const SECURITY_HEADERS = {
+  "x-content-type-options": "nosniff",
+  "x-frame-options": "DENY",
+  "referrer-policy": "strict-origin-when-cross-origin",
+  "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+};
+
+const rateBuckets = new Map(); // ip -> { count, resetAt }
+
+function checkRateLimit(ip) {
+  const now = Date.now();
+  let bucket = rateBuckets.get(ip);
+  if (!bucket || now >= bucket.resetAt) {
+    bucket = { count: 0, resetAt: now + RATE_LIMIT_WINDOW_MS };
+    rateBuckets.set(ip, bucket);
+  }
+  bucket.count += 1;
+  if (rateBuckets.size > 10_000) {
+    for (const [key, value] of rateBuckets) {
+      if (now >= value.resetAt) rateBuckets.delete(key);
+    }
+  }
+  return bucket.count <= RATE_LIMIT_MAX;
+}
+
 // ============================================================
 // OFFICIAL AMU SOURCE LINKS
 // ============================================================
@@ -189,7 +223,8 @@ async function fetchText(url, accept = "text/html,*/*") {
       headers: {
         accept,
         "user-agent": "AMU.ai student assistant (amu-ai/2.0)"
-      }
+      },
+      signal: AbortSignal.timeout(20_000)
     });
     if (!response.ok) throw new Error(`Official source returned ${response.status}`);
     return await response.text();
@@ -198,6 +233,7 @@ async function fetchText(url, accept = "text/html,*/*") {
     try {
       return await requestText(url, accept, true);
     } catch {
+      if (process.platform !== "win32") throw error; // PowerShell fallback is Windows-only
       return await requestTextWithPowerShell(url);
     }
   }
@@ -212,12 +248,13 @@ function canUseOfficialTlsFallback(url, error) {
   );
 }
 
-function requestText(url, accept, allowInvalidCertificate = false, redirects = 0) {
+function requestText(url, accept, allowInvalidCertificate = false, redirects = 0, timeoutMs = 15_000) {
   return new Promise((resolve, reject) => {
     const target = new URL(url);
     const client = target.protocol === "https:" ? https : http;
     const options = {
       method: "GET",
+      timeout: timeoutMs,
       headers: { accept, "user-agent": "AMU.ai student assistant (amu-ai/2.0)" }
     };
     if (target.protocol === "https:" && allowInvalidCertificate) options.rejectUnauthorized = false;
@@ -239,7 +276,7 @@ function requestText(url, accept, allowInvalidCertificate = false, redirects = 0
       res.on("end", () => resolve(body));
     });
     req.on("error", reject);
-    req.setTimeout(30000, () => req.destroy(new Error("Official source request timed out")));
+    req.setTimeout(timeoutMs, () => req.destroy(new Error("Official source request timed out")));
     req.end();
   });
 }
@@ -679,6 +716,7 @@ async function askGemini(systemContext, userMessage) {
     const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
+      signal: AbortSignal.timeout(20_000),
       body: JSON.stringify({
         contents: [
           {
@@ -795,7 +833,15 @@ function makeCourseLinkItem(course) {
 // ============================================================
 // CHAT ANSWER ENGINE (AI-first, with rule-based fallback)
 // ============================================================
+function sanitizeProfile(profile) {
+  const source = profile && typeof profile === "object" ? profile : {};
+  const enrollment = typeof source.enrollment === "string" ? source.enrollment.trim().slice(0, 40) : "";
+  const department = typeof source.department === "string" ? source.department.trim().slice(0, 80) : "";
+  return { enrollment, department };
+}
+
 async function answerChat(message, profile = {}) {
+  profile = sanitizeProfile(profile);
   // Try AI first if API key is available
   if (GEMINI_API_KEY) {
     try {
@@ -953,7 +999,8 @@ function jsonResponse(res, status, payload) {
   res.writeHead(status, {
     "content-type": "application/json; charset=utf-8",
     "cache-control": "no-store",
-    "content-length": Buffer.byteLength(body)
+    "content-length": Buffer.byteLength(body),
+    ...SECURITY_HEADERS
   });
   res.end(body);
 }
@@ -975,7 +1022,7 @@ async function serveStatic(req, res, pathname) {
     const data = await fs.readFile(filePath);
     const ext = path.extname(filePath).toLowerCase();
     const types = { ".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8", ".js": "application/javascript; charset=utf-8", ".json": "application/json; charset=utf-8", ".svg": "image/svg+xml" };
-    res.writeHead(200, { "content-type": types[ext] || "application/octet-stream", "cache-control": "no-cache" });
+    res.writeHead(200, { "content-type": types[ext] || "application/octet-stream", "cache-control": "no-cache", ...SECURITY_HEADERS });
     res.end(data);
   } catch {
     res.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
@@ -986,22 +1033,50 @@ async function serveStatic(req, res, pathname) {
 const server = http.createServer(async (req, res) => {
   const reqUrl = new URL(req.url, `http://${req.headers.host}`);
   try {
+    if (req.method === "GET" && reqUrl.pathname === "/health") {
+      jsonResponse(res, 200, {
+        status: "ok",
+        name: "amu-ai",
+        version: PACKAGE_VERSION,
+        aiConfigured: Boolean(GEMINI_API_KEY),
+        uptimeSeconds: Math.round(process.uptime()),
+        timestamp: new Date().toISOString()
+      });
+      return;
+    }
     if (req.method === "GET" && reqUrl.pathname === "/api/snapshot") { jsonResponse(res, 200, await collectSnapshot()); return; }
     if (req.method === "GET" && reqUrl.pathname === "/api/notices/recent") { jsonResponse(res, 200, { items: await fetchRecentNotices(reqUrl.searchParams.get("search") || "") }); return; }
     if (req.method === "GET" && reqUrl.pathname === "/api/notices/campus") { jsonResponse(res, 200, { items: await fetchCampusNotices(reqUrl.searchParams.get("search") || "") }); return; }
     if (req.method === "GET" && reqUrl.pathname === "/api/departments") { jsonResponse(res, 200, { items: await fetchDepartments() }); return; }
     if (req.method === "GET" && reqUrl.pathname === "/api/computer-science") { jsonResponse(res, 200, await fetchComputerScienceHub()); return; }
     if (req.method === "POST" && reqUrl.pathname === "/api/chat") {
+      if (!checkRateLimit(req.socket.remoteAddress || "unknown")) {
+        jsonResponse(res, 429, { error: "Too many chat requests. Please wait a minute and try again." });
+        return;
+      }
       const payload = await readRequestJson(req);
       const message = String(payload.message || "").trim();
       if (!message) { jsonResponse(res, 400, { error: "Message is required." }); return; }
-      jsonResponse(res, 200, await answerChat(message, payload.profile || {}));
+      if (message.length > MAX_MESSAGE_LENGTH) {
+        jsonResponse(res, 400, { error: `Message is too long. Please keep it under ${MAX_MESSAGE_LENGTH} characters.` });
+        return;
+      }
+      jsonResponse(res, 200, await answerChat(message, payload.profile));
+      return;
+    }
+    if (reqUrl.pathname.startsWith("/api/") || reqUrl.pathname === "/health") {
+      res.writeHead(405, { "content-type": "text/plain; charset=utf-8", "allow": "GET, POST" }); res.end("Method not allowed");
       return;
     }
     if (req.method === "GET") { await serveStatic(req, res, reqUrl.pathname); return; }
     res.writeHead(405, { "content-type": "text/plain; charset=utf-8" }); res.end("Method not allowed");
   } catch (error) {
-    jsonResponse(res, 500, { error: "AMU.ai could not complete that request.", detail: error.message });
+    console.error(`[amu-ai] ${req.method} ${reqUrl.pathname} failed:`, error.message);
+    if (process.env.NODE_ENV === "production") {
+      jsonResponse(res, 500, { error: "AMU.ai could not complete that request. Please try again shortly." });
+    } else {
+      jsonResponse(res, 500, { error: "AMU.ai could not complete that request.", detail: error.message });
+    }
   }
 });
 

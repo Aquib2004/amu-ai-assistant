@@ -1,0 +1,16 @@
+# Render blueprint: single free web service (API + static frontend in one process)
+services:
+  - type: web
+    name: amu-ai-assistant
+    runtime: node
+    freeTier: true
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # Optional — enables AI answers. Leave unset to use the rule-based fallback.
+      # - key: GEMINI_API_KEY
+      #   sync: false
