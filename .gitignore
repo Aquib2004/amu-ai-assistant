@@ -1,3 +1,22 @@
 node_modules/
 .env
 *.log
+
+# Nested separate repository (own git history + remote — never commit here)
+amu-cs-nexus/
+
+# Local editor / IDE state
+.vscode/
+
+# Local scratch & generated files
+Untitled-*.py
+Untitled-*.txt
+cm.txt
+commit_msg2.txt
+diag.py
+fetch_ca.py
+perf.py
+perf2.py
+CHANGELOG.html
+website
+*.db
