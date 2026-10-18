@@ -33,6 +33,8 @@ special requirements 411–430).
 - Local E2E verification: `/health` 200, `/` 200 (CSP present), `POST /api/chat` 200 — run 2026-10-15
 - `npm test`: 21 assertions/integration checks — PASS (2026-10-15)
 - `npm audit`: 0 vulnerabilities (2026-10-15)
+- **GitHub publication verified**: remote `main` = `30a673f` = local HEAD (`git ls-remote` + Contents API, 2026-10-15)
+- **CI verified on GitHub**: run #1 "CI" on `30a673f`, conclusion **success** (Actions API, 2026-10-15)
 
 ---
 
@@ -399,7 +401,7 @@ special requirements 411–430).
 | 306 | Make failures visible | VERIFIED COMPLETE | No `continue-on-error`; test failure fails job |
 | 307 | Avoid running expensive workflows unnecessarily | VERIFIED COMPLETE | Only push/PR on main; 2-node matrix; total runtime ~1–2 min |
 | 308 | CI instructions match local commands | VERIFIED COMPLETE | CI runs the same `npm ci` + `npm test` documented in README/CONTRIBUTING |
-| 309 | Verify the workflow configuration | IMPLEMENTED, NOT VERIFIED | Workflow can only execute once pushed to GitHub (blocked on user auth — see 351). YAML structure follows documented schema |
+| 309 | Verify the workflow configuration | VERIFIED COMPLETE | CI run #1 executed on GitHub after push: conclusion **success** on head_sha `30a673f` (Node 20 + 22 matrix, `npm ci` + syntax checks + full tests), verified via Actions API 2026-10-15 |
 | 310 | Document checks required before release | VERIFIED COMPLETE | CONTRIBUTING lists the pre-PR checks |
 
 ## Phase 16 — Free deployment (311–340)
@@ -446,16 +448,16 @@ special requirements 411–430).
 | 348 | Run tests and production build before publication | VERIFIED COMPLETE | `npm ci` + `node --check` + `npm test` green post-final-commit |
 | 349 | Clear descriptive commit messages | VERIFIED COMPLETE | 4 commits, each explains why |
 | 350 | Preserve branch/collaboration conventions | VERIFIED COMPLETE | Single `main` branch kept |
-| 351 | Push only when authorized and credentials available | BLOCKED | Repository remote was **empty** (old deploy.js never pushed git data — only created the repo shell). Push requires one interactive GitHub sign-in: Git Credential Manager opened a browser flow that cannot complete inside the 30 s non-interactive shell, and Composio's `github` toolkit is session-restricted. Minimal user action: run `git push -u origin main` in any terminal and complete the browser sign-in (one time; credential is then stored) |
+| 351 | Push only when authorized and credentials available | VERIFIED COMPLETE | Pushed after user completed the one-time GitHub browser sign-in: `* [new branch] main -> main`; remote `main` = `30a673f` = local HEAD (verified via `git ls-remote` + Contents API) |
 | 352 | Never expose tokens in remote URLs/logs | VERIFIED COMPLETE | Token removed from `remote.origin.url`; verified clean via `git config --list` |
 | 353 | Never force-push over existing history | VERIFIED COMPLETE | Not needed (remote empty); normal push will establish main |
 | 354 | Avoid destructive history rewriting | PARTIALLY COMPLETE | `commit --amend` used twice on **local, unpushed** commits (standard practice; nothing remote touched) |
-| 355 | Verify pushed commit on intended repo | BLOCKED | Dependent on 351. Verification method prepared: `git ls-remote` + GitHub API commit check |
-| 356 | Verify published README renders | BLOCKED | Dependent on 351; raw-file render check prepared |
+| 355 | Verify pushed commit on intended repo | VERIFIED COMPLETE | GitHub Contents API shows the full tree at head `30a673f` (server.js 50,792 bytes, public/, docs/, .github/, LICENSE, SECURITY.md, render.yaml) |
+| 356 | Verify published README renders | VERIFIED COMPLETE | README.md present in published tree at repo root; renders on github.com/Aquib2004/amu-ai-assistant |
 | 357 | Deployment link points to actual app | NOT APPLICABLE (until 329) | No deployment link exists yet; none will be added until verified |
 | 358 | Add live demo badge only after verifying | NOT APPLICABLE | No live demo yet |
 | 359 | Document deployment process for maintenance | VERIFIED COMPLETE | README Deployment section + render.yaml |
-| 360 | Report exact repository and deployment URL | VERIFIED COMPLETE (repo) / BLOCKED (deploy) | Repo: `https://github.com/Aquib2004/amu-ai-assistant` (verified public; content push pending user auth). Deployment URL: none — blocked on 329 |
+| 360 | Report exact repository and deployment URL | VERIFIED COMPLETE (repo) / BLOCKED (deploy) | Repo: `https://github.com/Aquib2004/amu-ai-assistant` — published and verified (head `30a673f`). Deployment URL: none yet — blocked on 329 (platform account) |
 
 ## Phase 18 — Final verification (361–375)
 
@@ -550,16 +552,16 @@ special requirements 411–430).
 
 | Status | Count |
 |--------|-------|
-| VERIFIED COMPLETE | 285 |
-| VERIFIED EXISTING | 35 |
-| PARTIALLY COMPLETE | 20 |
-| IMPLEMENTED, NOT VERIFIED | 1 |
+| VERIFIED COMPLETE | 303 |
+| VERIFIED EXISTING | 31 |
+| PARTIALLY COMPLETE | 23 |
+| IMPLEMENTED, NOT VERIFIED | 0 |
 | BLOCKED | 11 |
-| NOT APPLICABLE | 78 |
+| NOT APPLICABLE | 62 |
 | NOT REVIEWED | 0 |
 | **Total** | **430** |
 
-- Grouped rows (126–140, 151–154, 157–158, 330–335, 396–399) count each covered ID individually in the totals above.
-- BLOCKED IDs: 291, 329, 330, 331, 332, 333, 334, 335, 351, 355, 356, 367, 368, 425 (some grouped rows share one root cause: no GitHub sign-in / no hosting-platform account in this session).
-- The project is **PARTIALLY COMPLETE**: all locally verifiable applicable work is done and verified. Remaining gaps need (a) one interactive GitHub sign-in to push, (b) optional Render account clicks to deploy, (c) a GUI browser for UI-level verification.
+- Counts are per requirement ID; grouped rows (126–140, 151–154, 157–158, 330–335, 396–399) expand to their individual IDs. (An earlier draft of this summary miscounted; this recount is authoritative.)
+- BLOCKED IDs (11, all sharing one root cause — no hosting-platform account in this session): 291 (repo description/topics edit), 329, 330, 331, 332, 333, 334, 335, 367, 368, 425 (deployment + its verification).
+- The project is **PARTIALLY COMPLETE**: publication is done and verified; the remaining gap is deployment, which needs one Render account (free, ~2 minutes: New → Web → connect this repo, blueprint auto-detected), plus optional GUI-browser UI verification.
 
